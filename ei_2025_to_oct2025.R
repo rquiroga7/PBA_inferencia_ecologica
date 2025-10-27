@@ -44,9 +44,14 @@ merged_data[, total_oct2025 := rowSums(.SD, na.rm = TRUE), .SDcols = political_p
 merged_data[, diff_2025 := abs(total_2025 - cantidadElectores_2025)]
 merged_data[, diff_oct2025 := abs(total_oct2025 - cantidadElectores_oct2025)]
 
-# Use only circuits with perfect vote matching
-perfect_data <- merged_data[diff_2025 == 0 & diff_oct2025 == 0]
-cat("Final circuits for analysis:", nrow(perfect_data), "\n")
+# Allow small imbalances in Oct 2025 counts because of data rounding/noise
+oct_vote_balance_tolerance <- 100
+perfect_data <- merged_data[diff_2025 == 0 & diff_oct2025 <= oct_vote_balance_tolerance]
+cat(
+  "Final circuits for analysis (|Oct diff| <=", oct_vote_balance_tolerance, "):",
+  nrow(perfect_data), "\n"
+)
+cat("Share of matched circuits:", round(nrow(perfect_data) / nrow(merged_data) * 100, 1), "%\n")
 
 cat("\n=== UNDERSTANDING eiPack REQUIREMENTS ===\n")
 
@@ -82,6 +87,20 @@ cat("T matrix rows summing to 1.0:", sum(abs(perfect_data$t_sum - 1.0) < 1e-10),
 
 cat("X matrix sum range:", sprintf("%.10f to %.10f", min(perfect_data$x_sum), max(perfect_data$x_sum)), "\n")
 cat("T matrix sum range:", sprintf("%.10f to %.10f", min(perfect_data$t_sum), max(perfect_data$t_sum)), "\n")
+
+# Renormalize Oct 2025 proportions when small discrepancies remain
+needs_rescale <- abs(perfect_data$t_sum - 1.0) > 1e-8 & perfect_data$t_sum > 0
+if(any(needs_rescale)) {
+  cat("Normalizing Oct 2025 proportions for", sum(needs_rescale), "circuits with small imbalances\n")
+  perfect_data[needs_rescale, `:=`(
+    t1 = t1 / t_sum,
+    t2 = t2 / t_sum,
+    t3 = t3 / t_sum,
+    t4 = t4 / t_sum,
+    t5 = t5 / t_sum
+  )]
+  perfect_data[needs_rescale, t_sum := 1.0]
+}
 
 # Create data frame for eiPack using 2025 as baseline population
 ei_data <- perfect_data[, .(
@@ -448,31 +467,76 @@ cat("\n=== RESULTS TABLE 2: VOTE FLOWS (ABSOLUTE NUMBERS) ===\n")
 cat("Values show the estimated number of voters who moved from each 2025 party to each Oct 2025 option\n")
 cat("Based on", format(sum(as.numeric(total_votes_2025)), big.mark=","), "total voters in 2025\n\n")
 
-# Create a data.table for absolute vote flows
-vote_flows_table <- data.table(
-  From_2025 = rownames(vote_flows),
-  EN_BLANCO_Oct2025 = format(round(vote_flows[,1]), big.mark=","),
-  LLA_Oct2025 = format(round(vote_flows[,2]), big.mark=","),
-  NO_VOTANTES_Oct2025 = format(round(vote_flows[,3]), big.mark=","),
-  OTROS_Oct2025 = format(round(vote_flows[,4]), big.mark=","),
-  FP_Oct2025 = format(round(vote_flows[,5]), big.mark=","),
-  Total_From = format(round(rowSums(vote_flows)), big.mark=",")
-)
+adjust_rounding <- function(values) {
+  rounded_vals <- round(values)
+  target_total <- as.integer(round(sum(values)))
+  diff <- target_total - sum(rounded_vals)
+  if(diff > 0) {
+    order_idx <- order(values - floor(values), decreasing = TRUE)
+    idx <- 1
+    while(diff > 0 && length(order_idx) > 0) {
+      target_col <- order_idx[idx]
+      rounded_vals[target_col] <- rounded_vals[target_col] + 1
+      diff <- diff - 1
+      idx <- idx + 1
+      if(idx > length(order_idx)) idx <- 1
+    }
+  } else if(diff < 0) {
+    order_idx <- order(values - floor(values), decreasing = FALSE)
+    idx <- 1
+    while(diff < 0 && length(order_idx) > 0) {
+      target_col <- order_idx[idx]
+      if(rounded_vals[target_col] > 0) {
+        rounded_vals[target_col] <- rounded_vals[target_col] - 1
+        diff <- diff + 1
+      }
+      idx <- idx + 1
+      if(idx > length(order_idx)) idx <- 1
+    }
+  }
+  if(sum(rounded_vals) != target_total) {
+    stop("Rounded totals do not match target total")
+  }
+  rounded_vals
+}
 
-print(vote_flows_table)
+vote_flows_rounded <- matrix(0, nrow = nrow(vote_flows), ncol = ncol(vote_flows))
+rownames(vote_flows_rounded) <- rownames(vote_flows)
+colnames(vote_flows_rounded) <- colnames(vote_flows)
+
+for(i in seq_len(nrow(vote_flows))) {
+  vote_flows_rounded[i, ] <- adjust_rounding(vote_flows[i, ])
+}
+
+vote_flows_dt <- as.data.table(vote_flows_rounded)
+vote_flows_dt[, From_2025 := rownames(vote_flows_rounded)]
+flow_columns <- colnames(vote_flows_rounded)
+setcolorder(vote_flows_dt, c("From_2025", flow_columns))
+vote_flows_dt[, Total_From := rowSums(vote_flows_rounded)]
+
+vote_flows_print <- copy(vote_flows_dt)
+numeric_cols <- setdiff(names(vote_flows_print), "From_2025")
+vote_flows_print[, (numeric_cols) := lapply(.SD, function(x) format(x, big.mark=",")), .SDcols = numeric_cols]
+
+print(vote_flows_print)
 
 cat("\n=== RESULTS TABLE 3: OCT 2025 VOTE TOTALS COMPARISON ===\n")
 cat("Comparison between estimated flows from 2025 and actual Oct 2025 results\n\n")
 
-comparison_table <- data.table(
+comparison_table_numeric <- data.table(
   Party_Oct2025 = c("EN_BLANCO", "LLA", "NO_VOTANTES", "OTROS", "FP"),
-  Estimated_from_Matrix = format(round(estimated_oct2025), big.mark=","),
-  Actual_Oct2025 = format(round(as.numeric(actual_oct2025)), big.mark=","),
-  Difference = format(round(as.numeric(actual_oct2025) - estimated_oct2025), big.mark=","),
-  Percent_Difference = paste0(round(((as.numeric(actual_oct2025) - estimated_oct2025) / as.numeric(actual_oct2025)) * 100, 1), "%")
+  Estimated_from_Matrix = as.integer(round(estimated_oct2025)),
+  Actual_Oct2025 = as.integer(round(as.numeric(actual_oct2025))),
+  Difference = as.integer(round(as.numeric(actual_oct2025) - estimated_oct2025)),
+  Percent_Difference = round(((as.numeric(actual_oct2025) - estimated_oct2025) / as.numeric(actual_oct2025)) * 100, 1)
 )
 
-print(comparison_table)
+comparison_table_print <- copy(comparison_table_numeric)
+comparison_cols <- setdiff(names(comparison_table_print), "Party_Oct2025")
+comparison_table_print[, (setdiff(comparison_cols, "Percent_Difference")) := lapply(.SD, function(x) format(x, big.mark=",")), .SDcols = setdiff(comparison_cols, "Percent_Difference")]
+comparison_table_print[, Percent_Difference := paste0(Percent_Difference, "%")]
+
+print(comparison_table_print)
 
 cat("\n=== SUMMARY STATISTICS ===\n")
 cat("Total 2025 voters:", format(sum(as.numeric(total_votes_2025)), big.mark=","), "\n")
@@ -488,11 +552,24 @@ fwrite(proportions_table, "transfer_matrix_proportions_oct2025.csv")
 cat("✅ Transfer matrix (proportions) exported to: transfer_matrix_proportions_oct2025.csv\n")
 
 # Export absolute vote flows
-fwrite(vote_flows_table, "vote_flows_absolute_oct2025.csv")
+fwrite(vote_flows_dt, "vote_flows_absolute_oct2025.csv")
 cat("✅ Vote flows (absolute numbers) exported to: vote_flows_absolute_oct2025.csv\n")
 
 # Export comparison table
-fwrite(comparison_table, "results_comparison_oct2025.csv")
+fwrite(comparison_table_numeric, "results_comparison_oct2025.csv")
 cat("✅ Results comparison exported to: results_comparison_oct2025.csv\n")
+
+# Export edge list for Sankey inputs
+edge_list <- melt(
+  vote_flows_dt,
+  id.vars = "From_2025",
+  measure.vars = flow_columns,
+  variable.name = "To_Oct2025",
+  value.name = "Votes"
+)[Votes > 0]
+
+setorder(edge_list, From_2025, To_Oct2025)
+write.table(edge_list, "vote_flows_edge_list_oct2025.txt", quote = FALSE, row.names = FALSE, col.names = FALSE)
+cat("✅ Edge list exported to: vote_flows_edge_list_oct2025.txt\n")
 
 cat("\n🎯 ANALYSIS COMPLETE! All results exported successfully.\n")
