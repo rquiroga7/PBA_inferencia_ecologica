@@ -19,29 +19,46 @@ votes_oct2025 <- dcast(data_oct2025, circuitoId + cantidadElectores ~ nombreAgru
 setnames(votes_2025, gsub(" ", "_", colnames(votes_2025)))
 setnames(votes_oct2025, gsub(" ", "_", colnames(votes_oct2025)))
 
+# Rename parties to match across elections
+cat("Renaming parties for consistency...\n")
+if("LLA_JxC" %in% colnames(votes_2025)) {
+  setnames(votes_2025, "LLA_JxC", "LLA")
+  cat("  - Renamed LLA_JxC to LLA in 2025 data\n")
+}
+if("UxP" %in% colnames(votes_2025)) {
+  setnames(votes_2025, "UxP", "FP")
+  cat("  - Renamed UxP to FP in 2025 data\n")
+}
+
 # Merge datasets
-merged_data <- merge(votes_2025, votes_oct2025, by = "circuitoId", suffixes = c("_2025", "_oct2025"))
+merged_data <- merge(votes_2025, votes_oct2025, by = "circuitoId", suffixes = c("_sep2025", "_oct2025"))
 
 # Apply filtering criteria (±15% electorate stability)
 merged_data <- merged_data[
-  cantidadElectores_oct2025 <= 1.15 * cantidadElectores_2025 &
-  cantidadElectores_oct2025 >= 0.85 * cantidadElectores_2025
+  cantidadElectores_oct2025 <= 1.15 * cantidadElectores_sep2025 &
+  cantidadElectores_oct2025 >= 0.85 * cantidadElectores_sep2025
 ]
 
 cat("Circuits after filtering:", nrow(merged_data), "\n")
 
+# Merge EN_BLANCO and NO_VOTANTES into single category
+cat("\n=== MERGING EN_BLANCO AND NO_VOTANTES ===\n")
+merged_data[, NO_VOTO_sep2025 := EN_BLANCO_sep2025 + NO_VOTANTES_sep2025]
+merged_data[, NO_VOTO_oct2025 := EN_BLANCO_oct2025 + NO_VOTANTES_oct2025]
+cat("Created NO_VOTO category (EN_BLANCO + NO_VOTANTES) for both periods\n")
+
 # Define political categories
-# 2025 baseline: EN_BLANCO, LLA_JxC, NO_VOTANTES, OTROS, UxP
-# Oct 2025 target: EN_BLANCO, LLA, NO_VOTANTES, OTROS, FP
-# Note: Only conflicting columns get suffixes during merge
-political_parties_2025 <- c("EN_BLANCO_2025", "LLA_JxC", "NO_VOTANTES_2025", "OTROS_2025", "UxP")
-political_parties_oct2025 <- c("EN_BLANCO_oct2025", "LLA", "NO_VOTANTES_oct2025", "OTROS_oct2025", "FP")
+# 2025 baseline: NO_VOTO (EN_BLANCO+NO_VOTANTES), LLA, OTROS, FP
+# Oct 2025 target: NO_VOTO (EN_BLANCO+NO_VOTANTES), LLA, OTROS, FP
+# Note: All conflicting columns get suffixes during merge
+political_parties_2025 <- c("NO_VOTO_sep2025", "LLA_sep2025", "OTROS_sep2025", "FP_sep2025")
+political_parties_oct2025 <- c("NO_VOTO_oct2025", "LLA_oct2025", "OTROS_oct2025", "FP_oct2025")
 
 # Verify data completeness
 merged_data[, total_2025 := rowSums(.SD, na.rm = TRUE), .SDcols = political_parties_2025]
 merged_data[, total_oct2025 := rowSums(.SD, na.rm = TRUE), .SDcols = political_parties_oct2025]
 
-merged_data[, diff_2025 := abs(total_2025 - cantidadElectores_2025)]
+merged_data[, diff_2025 := abs(total_2025 - cantidadElectores_sep2025)]
 merged_data[, diff_oct2025 := abs(total_oct2025 - cantidadElectores_oct2025)]
 
 # Allow small imbalances in Oct 2025 counts because of data rounding/noise
@@ -62,25 +79,23 @@ cat("\n=== UNDERSTANDING eiPack REQUIREMENTS ===\n")
 
 # X matrix: 2025 proportions (proportion of 2025 electorate that voted for each party)
 perfect_data[, `:=`(
-  x1 = EN_BLANCO_2025 / cantidadElectores_2025,   # EN_BLANCO 2025
-  x2 = LLA_JxC / cantidadElectores_2025,          # LLA_JxC 2025 (coalition)
-  x3 = NO_VOTANTES_2025 / cantidadElectores_2025, # NO_VOTANTES 2025
-  x4 = OTROS_2025 / cantidadElectores_2025,       # OTROS 2025
-  x5 = UxP / cantidadElectores_2025               # UxP 2025
+  x1 = NO_VOTO_sep2025 / cantidadElectores_sep2025,     # NO_VOTO 2025 (EN_BLANCO + NO_VOTANTES)
+  x2 = LLA_sep2025 / cantidadElectores_sep2025,         # LLA 2025
+  x3 = OTROS_sep2025 / cantidadElectores_sep2025,       # OTROS 2025
+  x4 = FP_sep2025 / cantidadElectores_sep2025           # FP 2025
 )]
 
 # T matrix: Oct 2025 proportions (proportion of Oct 2025 electorate that voted for each party)
 perfect_data[, `:=`(
-  t1 = EN_BLANCO_oct2025 / cantidadElectores_oct2025,   # EN_BLANCO Oct 2025
-  t2 = LLA / cantidadElectores_oct2025,                 # LLA Oct 2025 (no longer coalition)
-  t3 = NO_VOTANTES_oct2025 / cantidadElectores_oct2025, # NO_VOTANTES Oct 2025
-  t4 = OTROS_oct2025 / cantidadElectores_oct2025,       # OTROS Oct 2025
-  t5 = FP / cantidadElectores_oct2025                   # FP Oct 2025 (formerly UxP)
+  t1 = NO_VOTO_oct2025 / cantidadElectores_oct2025,     # NO_VOTO Oct 2025 (EN_BLANCO + NO_VOTANTES)
+  t2 = LLA_oct2025 / cantidadElectores_oct2025,         # LLA Oct 2025
+  t3 = OTROS_oct2025 / cantidadElectores_oct2025,       # OTROS Oct 2025
+  t4 = FP_oct2025 / cantidadElectores_oct2025           # FP Oct 2025
 )]
 
 # Verify both X and T matrices have rows summing to 1.0
-perfect_data[, x_sum := x1 + x2 + x3 + x4 + x5]
-perfect_data[, t_sum := t1 + t2 + t3 + t4 + t5]
+perfect_data[, x_sum := x1 + x2 + x3 + x4]
+perfect_data[, t_sum := t1 + t2 + t3 + t4]
 
 cat("X matrix rows summing to 1.0:", sum(abs(perfect_data$x_sum - 1.0) < 1e-10), "\n")
 cat("T matrix rows summing to 1.0:", sum(abs(perfect_data$t_sum - 1.0) < 1e-10), "\n")
@@ -96,8 +111,7 @@ if(any(needs_rescale)) {
     t1 = t1 / t_sum,
     t2 = t2 / t_sum,
     t3 = t3 / t_sum,
-    t4 = t4 / t_sum,
-    t5 = t5 / t_sum
+    t4 = t4 / t_sum
   )]
   perfect_data[needs_rescale, t_sum := 1.0]
 }
@@ -105,16 +119,16 @@ if(any(needs_rescale)) {
 # Create data frame for eiPack using 2025 as baseline population
 ei_data <- perfect_data[, .(
   circuito = circuitoId,
-  x1, x2, x3, x4, x5,                         # 2025 proportions (sum to 1)
-  n = cantidadElectores_2025,                 # Baseline population
-  t1, t2, t3, t4, t5                          # Oct 2025 proportions (sum to 1)
+  x1, x2, x3, x4,                             # 2025 proportions (sum to 1)
+  n = cantidadElectores_sep2025,              # Baseline population
+  t1, t2, t3, t4                              # Oct 2025 proportions (sum to 1)
 )]
 
 cat("\n=== RUNNING ECOLOGICAL INFERENCE ===\n")
 cat("Data shape:", nrow(ei_data), "circuits ×", ncol(ei_data)-1, "variables\n")
 
-# Define formula: 5 outcome categories × 5 baseline categories
-formula_ei <- cbind(t1, t2, t3, t4, t5) ~ cbind(x1, x2, x3, x4, x5)
+# Define formula: 4 outcome categories × 4 baseline categories
+formula_ei <- cbind(t1, t2, t3, t4) ~ cbind(x1, x2, x3, x4)
 
 # Set lambda parameters based on eiPack example pattern
 # These are hyperparameters for the Dirichlet distribution prior
@@ -134,7 +148,7 @@ cat("Tuning completed successfully\n")
 cat("Running ei.MD.bayes with optimized MCMC parameters...\n")
 ei_result <- ei.MD.bayes(formula_ei, data = ei_data, total = ei_data$n,
                         lambda1 = lambda1, lambda2 = lambda2,
-                        burnin = 100000, sample = 4000, thin = 100,  # Optimized thin value
+                        burnin = 200000, sample = 5000, thin = 100,  # Optimized thin value
                         tune.list = tune_result)
 
 # Comprehensive convergence checking
@@ -154,7 +168,7 @@ post_burn_draws <- beta_draws[(burn_samples:n_samples), ]
 cat("Analyzing", nrow(post_burn_draws), "post-burn-in samples for", n_params, "parameters\n")
 
 # Test on a manageable sample of parameters
-sample_params <- min(50, n_params)  # Reduced sample size for reliability
+sample_params <- min(1000, n_params)  # Reduced sample size for reliability
 sample_indices <- seq(1, n_params, length.out = sample_params)
 
 # Initialize convergence tracking
@@ -329,13 +343,13 @@ cat("Found Beta draws with dimensions:", dim(ei_result$draws$Beta), "\n")
 n_samples <- nrow(ei_result$draws$Beta)
 n_params <- ncol(ei_result$draws$Beta)
 
-# For circuits × 5 source categories × 5 destination categories = 25 parameters per circuit
+# For circuits × 4 source categories × 4 destination categories = 16 parameters per circuit
 circuits_used <- nrow(ei_data)
 params_per_circuit <- n_params / circuits_used
 cat("Parameters per circuit:", params_per_circuit, "\n")
 
-if(params_per_circuit == 25) {  # 5×5 = 25 parameters per circuit
-  cat("Detected 5×5 transfer matrix per circuit\n")
+if(params_per_circuit == 16) {  # 4×4 = 16 parameters per circuit
+  cat("Detected 4×4 transfer matrix per circuit\n")
 
   # Calculate circuit-level averages, then overall average
   burn_samples <- max(1, floor(n_samples * 0.2))  # Remove first 20% as burn-in
@@ -345,7 +359,7 @@ if(params_per_circuit == 25) {  # 5×5 = 25 parameters per circuit
   beta_means <- apply(beta_post_burn, 2, mean)
 
   # Reshape into circuit-specific matrices and then average across circuits
-  circuit_matrices <- array(beta_means, dim = c(5, 5, circuits_used))
+  circuit_matrices <- array(beta_means, dim = c(4, 4, circuits_used))
 
   # Average transfer probabilities across all circuits
   transfer_matrix <- apply(circuit_matrices, c(1, 2), mean)
@@ -357,18 +371,18 @@ if(params_per_circuit == 25) {  # 5×5 = 25 parameters per circuit
 
   # Try extracting just the first circuit's parameters as an example
   first_circuit_params <- n_params / circuits_used
-  if(first_circuit_params >= 25) {
-    beta_means <- apply(ei_result$draws$Beta[, 1:25], 2, mean)
-    transfer_matrix <- matrix(beta_means, nrow = 5, ncol = 5, byrow = TRUE)
+  if(first_circuit_params >= 16) {
+    beta_means <- apply(ei_result$draws$Beta[, 1:16], 2, mean)
+    transfer_matrix <- matrix(beta_means, nrow = 4, ncol = 4, byrow = TRUE)
     cat("Using first circuit parameters as representative\n")
   } else {
-    transfer_matrix <- matrix(0.2, nrow = 5, ncol = 5)
+    transfer_matrix <- matrix(0.25, nrow = 4, ncol = 4)
     cat("Using placeholder matrix\n")
   }
 }
 
-rownames(transfer_matrix) <- c("EN_BLANCO_2025", "LLA_JxC_2025", "NO_VOTANTES_2025", "OTROS_2025", "UxP_2025")  # Display names
-colnames(transfer_matrix) <- c("EN_BLANCO_Oct2025", "LLA_Oct2025", "NO_VOTANTES_Oct2025", "OTROS_Oct2025", "FP_Oct2025")
+rownames(transfer_matrix) <- c("NO_VOTO_2025", "LLA_2025", "OTROS_2025", "FP_2025")
+colnames(transfer_matrix) <- c("NO_VOTO_Oct2025", "LLA_Oct2025", "OTROS_Oct2025", "FP_Oct2025")
 
 cat("Transfer Matrix (2025 → Oct 2025):\n")
 cat("Values show probability of transition from 2025 party to Oct 2025 party\n\n")
@@ -379,27 +393,23 @@ cat("\n=== POLITICAL ANALYSIS ===\n")
 
 # Loyalty rates (staying with same/similar party)
 cat("LOYALTY RATES:\n")
-cat("EN_BLANCO loyalty:", round(transfer_matrix[1,1] * 100, 1), "%\n")
-cat("NO_VOTANTES loyalty:", round(transfer_matrix[3,3] * 100, 1), "%\n")
-cat("OTROS loyalty:", round(transfer_matrix[4,4] * 100, 1), "%\n")
-cat("UxP/FP continuity (UxP → FP):", round(transfer_matrix[5,5] * 100, 1), "%\n")
-
-# Coalition dynamics (LLA_JxC splitting)
-cat("\nCOALITION DYNAMICS (LLA_JxC → LLA):\n")
-cat("LLA_JxC → LLA:", round(transfer_matrix[2,2] * 100, 1), "%\n")
-cat("LLA_JxC → NO_VOTANTES:", round(transfer_matrix[2,3] * 100, 1), "%\n")
+cat("NO_VOTO loyalty (EN_BLANCO+NO_VOTANTES):", round(transfer_matrix[1,1] * 100, 1), "%\n")
+cat("LLA loyalty:", round(transfer_matrix[2,2] * 100, 1), "%\n")
+cat("OTROS loyalty:", round(transfer_matrix[3,3] * 100, 1), "%\n")
+cat("FP loyalty:", round(transfer_matrix[4,4] * 100, 1), "%\n")
 
 # Key political movements
 cat("\nCROSS-PARTY MOVEMENTS:\n")
-cat("UxP → LLA:", round(transfer_matrix[5,2] * 100, 1), "%\n")
-cat("UxP/FP → NO_VOTANTES:", round(transfer_matrix[5,3] * 100, 1), "%\n")
-cat("LLA_JxC → FP:", round(transfer_matrix[2,5] * 100, 1), "%\n")
+cat("LLA → NO_VOTO:", round(transfer_matrix[2,1] * 100, 1), "%\n")
+cat("LLA → FP:", round(transfer_matrix[2,4] * 100, 1), "%\n")
+cat("FP → LLA:", round(transfer_matrix[4,2] * 100, 1), "%\n")
+cat("FP → NO_VOTO:", round(transfer_matrix[4,1] * 100, 1), "%\n")
 
 # Validate: each row should sum to approximately 1 (but may be less due to population changes)
 cat("\n=== VALIDATION ===\n")
 row_sums <- rowSums(transfer_matrix)
 cat("Row sums (transition probabilities, should be ≤ 1.0):\n")
-for(i in 1:5) {
+for(i in 1:4) {
   cat(sprintf("%s: %.3f\n", rownames(transfer_matrix)[i], row_sums[i]))
 }
 
@@ -412,38 +422,35 @@ cat("\n=== COMPREHENSIVE RESULTS OUTPUT ===\n")
 
 # Calculate total votes for each category in 2025
 total_votes_2025 <- perfect_data[, .(
-  EN_BLANCO = sum(EN_BLANCO_2025),
-  LLA_JxC = sum(LLA_JxC),
-  NO_VOTANTES = sum(NO_VOTANTES_2025),
-  OTROS = sum(OTROS_2025),
-  UxP = sum(UxP)
+  NO_VOTO = sum(NO_VOTO_sep2025),
+  LLA = sum(LLA_sep2025),
+  OTROS = sum(OTROS_sep2025),
+  FP = sum(FP_sep2025)
 )]
 
 cat("Total votes in 2025:\n")
 print(total_votes_2025)
 
 # Calculate estimated vote flows using transfer matrix
-vote_flows <- matrix(0, nrow = 5, ncol = 5)
+vote_flows <- matrix(0, nrow = 4, ncol = 4)
 rownames(vote_flows) <- rownames(transfer_matrix)
 colnames(vote_flows) <- colnames(transfer_matrix)
 
 # Calculate absolute vote transfers
-vote_flows[1,] <- total_votes_2025$EN_BLANCO * transfer_matrix[1,]    # EN_BLANCO
-vote_flows[2,] <- total_votes_2025$LLA_JxC * transfer_matrix[2,]      # LLA_JxC
-vote_flows[3,] <- total_votes_2025$NO_VOTANTES * transfer_matrix[3,]  # NO_VOTANTES
-vote_flows[4,] <- total_votes_2025$OTROS * transfer_matrix[4,]        # OTROS
-vote_flows[5,] <- total_votes_2025$UxP * transfer_matrix[5,]          # UxP
+vote_flows[1,] <- total_votes_2025$NO_VOTO * transfer_matrix[1,]   # NO_VOTO
+vote_flows[2,] <- total_votes_2025$LLA * transfer_matrix[2,]       # LLA
+vote_flows[3,] <- total_votes_2025$OTROS * transfer_matrix[3,]     # OTROS
+vote_flows[4,] <- total_votes_2025$FP * transfer_matrix[4,]        # FP
 
 # Calculate estimated Oct 2025 totals from transfer matrix
 estimated_oct2025 <- colSums(vote_flows)
 
 # Get actual Oct 2025 totals for comparison
 actual_oct2025 <- perfect_data[, .(
-  EN_BLANCO = sum(EN_BLANCO_oct2025),
-  LLA = sum(LLA),
-  NO_VOTANTES = sum(NO_VOTANTES_oct2025),
+  NO_VOTO = sum(NO_VOTO_oct2025),
+  LLA = sum(LLA_oct2025),
   OTROS = sum(OTROS_oct2025),
-  FP = sum(FP)
+  FP = sum(FP_oct2025)
 )]
 
 cat("\n=== RESULTS TABLE 1: TRANSFER MATRIX (PROPORTIONS) ===\n")
@@ -453,11 +460,10 @@ cat("Each row sums to ≤ 1.0 (differences reflect population changes)\n\n")
 # Create a data.table for proportions
 proportions_table <- data.table(
   From_2025 = rownames(transfer_matrix),
-  EN_BLANCO_Oct2025 = round(transfer_matrix[,1], 4),
+  NO_VOTO_Oct2025 = round(transfer_matrix[,1], 4),
   LLA_Oct2025 = round(transfer_matrix[,2], 4),
-  NO_VOTANTES_Oct2025 = round(transfer_matrix[,3], 4),
-  OTROS_Oct2025 = round(transfer_matrix[,4], 4),
-  FP_Oct2025 = round(transfer_matrix[,5], 4),
+  OTROS_Oct2025 = round(transfer_matrix[,3], 4),
+  FP_Oct2025 = round(transfer_matrix[,4], 4),
   Row_Sum = round(rowSums(transfer_matrix), 4)
 )
 
@@ -524,7 +530,7 @@ cat("\n=== RESULTS TABLE 3: OCT 2025 VOTE TOTALS COMPARISON ===\n")
 cat("Comparison between estimated flows from 2025 and actual Oct 2025 results\n\n")
 
 comparison_table_numeric <- data.table(
-  Party_Oct2025 = c("EN_BLANCO", "LLA", "NO_VOTANTES", "OTROS", "FP"),
+  Party_Oct2025 = c("NO_VOTO", "LLA", "OTROS", "FP"),
   Estimated_from_Matrix = as.integer(round(estimated_oct2025)),
   Actual_Oct2025 = as.integer(round(as.numeric(actual_oct2025))),
   Difference = as.integer(round(as.numeric(actual_oct2025) - estimated_oct2025)),

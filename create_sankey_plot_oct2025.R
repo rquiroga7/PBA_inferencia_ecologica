@@ -23,7 +23,7 @@ cat("✅ Data loaded successfully\n")
 cat("Vote flows data dimensions:", nrow(vote_flows_data), "×", ncol(vote_flows_data), "\n")
 
 # Clean the data - remove commas and convert to numeric
-numeric_cols <- c("EN_BLANCO_Oct2025", "LLA_Oct2025", "NO_VOTANTES_Oct2025", "OTROS_Oct2025", "FP_Oct2025")
+numeric_cols <- c("NO_VOTO_Oct2025", "LLA_Oct2025", "OTROS_Oct2025", "FP_Oct2025")
 
 for(col in numeric_cols) {
   # Remove commas and convert to numeric
@@ -33,14 +33,14 @@ for(col in numeric_cols) {
 # Create nodes data frame
 # Source nodes (2025 parties)
 source_nodes <- data.frame(
-  name = c("EN_BLANCO_2025", "LLA_JxC_2025", "NO_VOTANTES_2025", "OTROS_2025", "UxP_2025"),
+  name = c("NO_VOTO_sep2025", "LLA_sep2025", "OTROS_sep2025", "FP_sep2025"),
   group = "2025",
   stringsAsFactors = FALSE
 )
 
 # Target nodes (Oct 2025 parties)
 target_nodes <- data.frame(
-  name = c("EN_BLANCO_Oct2025", "LLA_Oct2025", "NO_VOTANTES_Oct2025", "OTROS_Oct2025", "FP_Oct2025"),
+  name = c("NO_VOTO_oct2025", "LLA_oct2025", "OTROS_oct2025", "FP_oct2025"),
   group = "Oct2025",
   stringsAsFactors = FALSE
 )
@@ -56,14 +56,12 @@ links <- data.frame()
 
 # Map source parties to their indices
 source_mapping <- c(
-  "EN_BLANCO_2025" = 0, "LLA_JxC_2025" = 1, "NO_VOTANTES_2025" = 2,
-  "OTROS_2025" = 3, "UxP_2025" = 4
+  "NO_VOTO_2025" = 0, "LLA_2025" = 1, "OTROS_2025" = 2, "FP_2025" = 3
 )
 
 # Map target parties to their indices
 target_mapping <- c(
-  "EN_BLANCO_Oct2025" = 5, "LLA_Oct2025" = 6, "NO_VOTANTES_Oct2025" = 7,
-  "OTROS_Oct2025" = 8, "FP_Oct2025" = 9
+  "NO_VOTO_Oct2025" = 4, "LLA_Oct2025" = 5, "OTROS_Oct2025" = 6, "FP_Oct2025" = 7
 )
 
 # Create links from the vote flows data
@@ -96,29 +94,24 @@ nodes$display_name <- gsub("_2025|_Oct2025", "", nodes$name)
 nodes$display_name <- gsub("_", " ", nodes$display_name)
 
 # Improve specific party names
-nodes$display_name[nodes$display_name == "EN BLANCO"] <- "Blank Votes"
-nodes$display_name[nodes$display_name == "NO VOTANTES"] <- "Non-Voters"
-nodes$display_name[nodes$display_name == "LLA JxC"] <- "LLA+JxC Coalition"
+nodes$display_name[nodes$display_name == "NO VOTO"] <- "Blanco/No-Votantes"
 nodes$display_name[nodes$display_name == "LLA"] <- "La Libertad Avanza"
-nodes$display_name[nodes$display_name == "OTROS"] <- "Other Parties"
-nodes$display_name[nodes$display_name == "UxP"] <- "Unión por la Patria"
-nodes$display_name[nodes$display_name == "FP"] <- "Frente Patria"
+nodes$display_name[nodes$display_name == "OTROS"] <- "Otros Partidos"
+nodes$display_name[nodes$display_name == "FP"] <- "Fuerza Patria"
 
 # Define colors for each party/group
 party_colors <- c(
   # 2025 parties (source)
-  "#E8E8E8",  # EN_BLANCO_2025 - Light gray
-  "#8A2BE2",  # LLA_JxC_2025 - Blue Violet (coalition)
-  "#808080",  # NO_VOTANTES_2025 - Gray
+  "#808080",  # NO_VOTO_2025 - Gray (merged EN_BLANCO + NO_VOTANTES)
+  "#9966CC",  # LLA_2025 - Purple
   "#D2B48C",  # OTROS_2025 - Tan
-  "#4169E1",  # UxP_2025 - Royal Blue
+  "#1d8eeb",  # FP_2025 - Royal Blue
 
   # Oct 2025 parties (target)
-  "#E8E8E8",  # EN_BLANCO_Oct2025 - Light gray
-  "#9966CC",  # LLA_Oct2025 - Purple (no longer coalition)
-  "#808080",  # NO_VOTANTES_Oct2025 - Gray
+  "#808080",  # NO_VOTO_Oct2025 - Gray (merged EN_BLANCO + NO_VOTANTES)
+  "#9966CC",  # LLA_Oct2025 - Purple
   "#D2B48C",  # OTROS_Oct2025 - Tan
-  "#FF6347"   # FP_Oct2025 - Tomato (Frente Patria)
+  "#1d8eeb"   # FP_Oct2025 - Tomato
 )
 
 # Create the Sankey plot
@@ -191,25 +184,25 @@ cat("\n=== PARTY LOYALTY ANALYSIS ===\n")
 # Find same-party flows (or close matches)
 loyalty_flows <- list()
 
-# UxP → FP loyalty (UxP 2025 → FP Oct 2025)
-fp_loyalty <- links[links$source == 4 & links$target == 9, ]
+# NO_VOTO persistence (NO_VOTO 2025 → NO_VOTO Oct 2025)
+no_voto_persistence <- links[links$source == 0 & links$target == 4, ]
+if(nrow(no_voto_persistence) > 0) {
+  cat("NO_VOTO → NO_VOTO: ", format(round(no_voto_persistence$value), big.mark = ","), " votos\n")
+  loyalty_flows$NO_VOTO <- no_voto_persistence$value
+}
+
+# LLA loyalty (LLA 2025 → LLA Oct 2025)
+lla_loyalty <- links[links$source == 1 & links$target == 5, ]
+if(nrow(lla_loyalty) > 0) {
+  cat("LLA → LLA: ", format(round(lla_loyalty$value), big.mark = ","), " votos\n")
+  loyalty_flows$LLA <- lla_loyalty$value
+}
+
+# FP loyalty (FP 2025 → FP Oct 2025)
+fp_loyalty <- links[links$source == 3 & links$target == 7, ]
 if(nrow(fp_loyalty) > 0) {
-  cat("UxP → FP: ", format(round(fp_loyalty$value), big.mark = ","), " votos\n")
+  cat("FP → FP: ", format(round(fp_loyalty$value), big.mark = ","), " votos\n")
   loyalty_flows$FP <- fp_loyalty$value
-}
-
-# Coalition split (LLA_JxC → LLA)
-coalition_to_lla <- links[links$source == 1 & links$target == 6, ]
-if(nrow(coalition_to_lla) > 0) {
-  cat("LLA+JxC → LLA: ", format(round(coalition_to_lla$value), big.mark = ","), " votos\n")
-  loyalty_flows$LLA_continuity <- coalition_to_lla$value
-}
-
-# Non-voter persistence
-nonvoter_persistence <- links[links$source == 2 & links$target == 7, ]
-if(nrow(nonvoter_persistence) > 0) {
-  cat("Ausentes: ", format(round(nonvoter_persistence$value), big.mark = ","), " votos\n")
-  loyalty_flows$NonVoter <- nonvoter_persistence$value
 }
 
 # Calculate total flows for percentage analysis
